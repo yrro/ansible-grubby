@@ -166,7 +166,6 @@ def main():
     grubby_args.append("--"+grubby_addremove+"args=" + " ".join(args_to_change))
 
     result[result_key] = list(args_to_change)
-    result["grubby_args"] = grubby_args
 
     if module.check_mode or not args_to_change:
         module.exit_json(**result)

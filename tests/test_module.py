@@ -62,14 +62,24 @@ def get_bin_path(self, arg, required=False):
         if required:
             fail_json(msg=f"{arg!r} not found")
 
-def run_module(monkeypatch, args, grubby_info):
+def run_module(monkeypatch, args, grubby_info, grubby_update=(0, "", ""), want_grubby_args=False):
     monkeypatch.setattr(basic.AnsibleModule, "exit_json", exit_json)
     monkeypatch.setattr(basic.AnsibleModule, "fail_json", fail_json)
     monkeypatch.setattr(basic.AnsibleModule, "get_bin_path", get_bin_path)
 
+    _grubby_info_args = []
+    _grubby_update_args = []
+
     def run_command(self, args_, *args, **kwargs):
         assert args_[0] == "/mock/grubby"
-        return grubby_info
+        if args_[1].startswith("--info="):
+            _grubby_info_args.extend(args_)
+            return grubby_info
+        elif args_[1].startswith("--update-kernel="):
+            _grubby_update_args.extend(args_)
+            return grubby_update
+        else:
+            assert False, f"{args_[0]}: unknown option {args_[1]}"
 
     monkeypatch.setattr(basic.AnsibleModule, "run_command", run_command)
 
@@ -79,6 +89,9 @@ def run_module(monkeypatch, args, grubby_info):
         grubby.main()
 
     (result,) = excinfo.value.args
+    if want_grubby_args:
+        result["_grubby_info_args"] = _grubby_info_args
+        result["_grubby_update_args"] = _grubby_update_args
     return result
 
 grubby_state_single = """\
@@ -91,12 +104,39 @@ title="blah"
 id="..."
 """
 
+def test_add_noval_noop_grubby_args(monkeypatch):
+    # when:
+    result = run_module(monkeypatch, args={"state": "present", "args": ["foo"], "kernel_path": "whatever"}, grubby_info=(0, grubby_state_single, ""), want_grubby_args=True)
+
+    # then:
+    assert ["/mock/grubby", "--info=whatever"] == result["_grubby_info_args"] and [] == result["_grubby_update_args"]
+
+def test_add_noval_grubby_args(monkeypatch):
+    # when:
+    result = run_module(monkeypatch, args={"state": "present", "args": ["qux"], "kernel_path": "whatever"}, grubby_info=(0, grubby_state_single, ""), want_grubby_args=True)
+
+    # then:
+    assert ["/mock/grubby", "--info=whatever"] == result["_grubby_info_args"] and ["/mock/grubby", "--update-kernel=whatever", "--args=qux"] == result["_grubby_update_args"]
+
+def test_remove_noval_noop_grubby_args(monkeypatch):
+    # when:
+    result = run_module(monkeypatch, args={"state": "absent", "args": ["qux"], "kernel_path": "whatever"}, grubby_info=(0, grubby_state_single, ""), want_grubby_args=True)
+
+    # then:
+    assert ["/mock/grubby", "--info=whatever"] == result["_grubby_info_args"] and [] == result["_grubby_update_args"]
+
+def test_remove_noval_grubby_args(monkeypatch):
+    # when:
+    result = run_module(monkeypatch, args={"state": "absent", "args": ["foo"], "kernel_path": "whatever"}, grubby_info=(0, grubby_state_single, ""), want_grubby_args=True)
+
+    # then:
+    assert ["/mock/grubby", "--info=whatever"] == result["_grubby_info_args"] and ["/mock/grubby", "--update-kernel=whatever", "--remove-args=foo"] == result["_grubby_update_args"]
+
 def test_add_noval_noop(monkeypatch):
     # when:
     result = run_module(monkeypatch, args={"state": "present", "args": ["foo"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_add_noval(monkeypatch):
@@ -104,7 +144,6 @@ def test_add_noval(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["qux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["qux"], "args_removed": []} == result
 
 def test_add_val_noop(monkeypatch):
@@ -112,7 +151,6 @@ def test_add_val_noop(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["bar=baz"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_add_val(monkeypatch):
@@ -120,7 +158,6 @@ def test_add_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["qux=quux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["qux=quux"], "args_removed": []} == result
 
 def test_change_modify_val_noop(monkeypatch):
@@ -128,7 +165,6 @@ def test_change_modify_val_noop(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["bar=baz"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_change_modify_val(monkeypatch):
@@ -136,7 +172,6 @@ def test_change_modify_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["bar=qux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["bar=qux"], "args_removed": []} == result
 
 def test_change_add_val_noop(monkeypatch):
@@ -144,7 +179,6 @@ def test_change_add_val_noop(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["bar=baz"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_change_add_val(monkeypatch):
@@ -152,7 +186,6 @@ def test_change_add_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["foo=qux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["foo=qux"], "args_removed": []} == result
 
 def test_change_remove_val_noop(monkeypatch):
@@ -160,7 +193,6 @@ def test_change_remove_val_noop(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["foo"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_change_remove_val(monkeypatch):
@@ -168,7 +200,6 @@ def test_change_remove_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["bar"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["bar"], "args_removed": []} == result
 
 def test_remove_val_noop(monkeypatch):
@@ -176,7 +207,6 @@ def test_remove_val_noop(monkeypatch):
     result = run_module(monkeypatch, args={"state": "absent", "args": ["qux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_remove_val(monkeypatch):
@@ -184,7 +214,6 @@ def test_remove_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "absent", "args": ["bar"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": [], "args_removed": ["bar"]} == result
 
 def test_remove_noval_noop(monkeypatch):
@@ -192,7 +221,6 @@ def test_remove_noval_noop(monkeypatch):
     result = run_module(monkeypatch, args={"state": "absent", "args": ["qux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": False, "args_added": [], "args_removed": []} == result
 
 def test_remove_noval(monkeypatch):
@@ -200,7 +228,6 @@ def test_remove_noval(monkeypatch):
     result = run_module(monkeypatch, args={"state": "absent", "args": ["foo"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_single, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": [], "args_removed": ["foo"]} == result
 
 grubby_state_multi = """\
@@ -225,7 +252,6 @@ def test_multi_change_add_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["quux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_multi, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["quux"], "args_removed": []} == result
 
 def test_multi_change_modify_val(monkeypatch):
@@ -233,7 +259,6 @@ def test_multi_change_modify_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "present", "args": ["bar=quux"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_multi, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": ["bar=quux"], "args_removed": []} == result
 
 def test_multi_change_remove_val(monkeypatch):
@@ -241,5 +266,4 @@ def test_multi_change_remove_val(monkeypatch):
     result = run_module(monkeypatch, args={"state": "absent", "args": ["bar=baz"], "_ansible_check_mode": True}, grubby_info=(0, grubby_state_multi, ""))
 
     # then:
-    result.pop("grubby_args")
     assert {"changed": True, "args_added": [], "args_removed": ["bar=baz"]} == result
