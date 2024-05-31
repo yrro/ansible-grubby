@@ -1,0 +1,7 @@
+- hosts: localhost
+  tasks:
+  - name: test adding args with string
+    grubby:
+      state: present
+      args: foo=bar baz=qux
+...
