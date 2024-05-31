@@ -152,21 +152,28 @@ def main():
                 if far in [FindArgResult.PRESENT, FindArgResult.CHANGED]:
                     args_to_change.add(arg)
 
-    if module.check_mode or not args_to_change:
-        module.exit_json(**result)
+    result["changed"] = bool(args_to_change)
 
     grubby_args = [grubby_bin_path, "--update-kernel="+module.params["kernel_path"]]
     if module.params["state"] == "present":
         grubby_addremove = ""
+        result_key = "args_added"
     elif module.params["state"] == "absent":
         grubby_addremove = "remove-"
-    grubby_args += "--"+grubby_addremove+"args=" + " ".join(result["args_added"])
+        result_key = "args_removed"
+    else:
+        module.fail_json("Invalid state parameter", state=state)
+    grubby_args.append("--"+grubby_addremove+"args=" + " ".join(args_to_change))
+
+    result[result_key] = list(args_to_change)
+    result["grubby_args"] = grubby_args
+
+    if module.check_mode or not args_to_change:
+        module.exit_json(**result)
 
     rc, stdout, stderr = module.run_command([*grubby_args])
     if rc != 0:
         module.fail_json(f"grubby failed", args=grubby_args, rc=rc, stdout=stdout, stderr=stderr)
-
-    result["changed"] = any([result["args_added"], result["args_removed"]])
 
     module.exit_json(**result)
 
