@@ -1,4 +1,5 @@
 import importlib.util
+from itertools import permutations
 import json
 from pathlib import Path
 import sys
@@ -7,31 +8,37 @@ from ansible.module_utils import basic
 from ansible.module_utils.common.text.converters import to_bytes
 import pytest
 
+
 spec = importlib.util.spec_from_file_location("grubby", "library/grubby.py")
 grubby = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(grubby)
 
 
-def test_simple_arg_present():
-    assert grubby.FindArgResult.PRESENT == grubby.find_arg_in("foo", ["foo", "bar"])
+arg_test_params = [
+    (grubby.FindArgResult.PRESENT, "foo", ["foo", "bar"]),
+    (grubby.FindArgResult.CHANGED, "foo", ["foo=bar", "bar"]),
+    (grubby.FindArgResult.CHANGED, "foo", ["xyz", "foo", "foo=baz"]),
+    (grubby.FindArgResult.MISSING, "foo", ["bar", "qux"]),
+    (grubby.FindArgResult.CHANGED, "foo", ["foo=bar", "foo=qux", "quux"]),
+    (grubby.FindArgResult.PRESENT, "foo=bar", ["foo=bar", "baz"]),
+    (grubby.FindArgResult.CHANGED, "foo=bar", ["foo=baz", "bar"]),
+    (grubby.FindArgResult.CHANGED, "foo=bar", ["foo", "baz"]),
+    (grubby.FindArgResult.MISSING, "foo=bar", ["baz=bar", "qux"]),
+]
 
-def test_simple_arg_value_present():
-    assert grubby.FindArgResult.CHANGED == grubby.find_arg_in("foo", ["foo=baz", "bar"])
+arg_test_params_permuted = []
+for expected, arg, args in arg_test_params:
+    for p in permutations(args):
+        arg_test_params_permuted.append((expected, arg, p))
 
-def test_simple_arg_absent():
-    assert grubby.FindArgResult.MISSING == grubby.find_arg_in("qux", ["foo", "bar"])
+def permutate_id_fn(arg):
+    if isinstance(arg, tuple):
+        return ' '.join(list(arg))
+    return None
 
-def test_complex_arg_value_present_matching():
-    assert grubby.FindArgResult.PRESENT == grubby.find_arg_in("foo=bar", ["foo=bar", "baz"])
-
-def test_complex_arg_value_present_different():
-    assert grubby.FindArgResult.CHANGED == grubby.find_arg_in("foo=bar", ["foo=baz", "bar"])
-
-def test_complex_arg_value_present_missing():
-    assert grubby.FindArgResult.CHANGED == grubby.find_arg_in("foo=bar", ["foo", "baz"]) 
-
-def test_complex_arg_value_absent():
-    assert grubby.FindArgResult.MISSING == grubby.find_arg_in("foo=bar", ["baz=bar"])
+@pytest.mark.parametrize("expected,arg,args", arg_test_params_permuted, ids=permutate_id_fn)
+def test_find_arg_in(expected, arg, args):
+    assert expected == grubby.find_arg_in(arg, args)
 
 
 def set_module_args(args):

@@ -185,14 +185,16 @@ class FindArgResult(enum.Enum):
 
 def find_arg_in(arg, current_args):
     argk, sep, argv = arg.partition("=")
+    result = FindArgResult.MISSING
     for current_arg in current_args:
         current_argk, sep, current_argv = current_arg.partition("=")
-        if argk == current_argk:
-            if argv == current_argv:
-                return FindArgResult.PRESENT
-            else:
-                return FindArgResult.CHANGED
-    return FindArgResult.MISSING
+        if argk != current_argk:
+            continue
+        if current_argv != argv:
+            result = FindArgResult.CHANGED
+        elif result != FindArgResult.CHANGED:
+            result = FindArgResult.PRESENT
+    return result
 
 
 if __name__ == '__main__':
