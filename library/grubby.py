@@ -97,7 +97,7 @@ message:
 def main():
     # define available arguments/parameters a user can pass to the module
     module_args = dict(
-        args=dict(type='list', required=True),
+        args=dict(type='list', elements='str', required=True),
         state=dict(type='str', required=True, choices=['present', 'absent']),
         kernel_path=dict(type='str', default='ALL'),
     )
